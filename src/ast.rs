@@ -1,14 +1,7 @@
 use crate::{types::*, utils::*};
 use anyhow::{Context, Result};
-use indexmap::IndexMap;
-use log::debug;
 use serde_json::Value;
-use std::{
-    collections::{HashMap, HashSet},
-    fs::File,
-    io::Write,
-    process::Command,
-};
+use std::process::Command;
 use tempfile::NamedTempFile;
 
 /// Parse AST JSON and extract contract information
@@ -198,7 +191,7 @@ fn process_functions_and_interactions(ast: &Value, data: &mut DiagramData) -> Re
                                 }
 
                                 // Create message with parameter types
-                                let mut message = if params.is_empty() {
+                                let message = if params.is_empty() {
                                     format!("{}()", function_name)
                                 } else {
                                     let param_type_str: Vec<String> = params
@@ -755,7 +748,7 @@ fn process_function_body(
 /// The AST JSON representation of the Solidity file
 pub fn process_solidity_file(file_path: &str) -> Result<Value> {
     // Create a temporary file for the AST output
-    let mut temp_file = NamedTempFile::new()?;
+    let temp_file = NamedTempFile::new()?;
     let temp_path = temp_file.path().to_string_lossy().to_string();
 
     // Run solc to generate AST

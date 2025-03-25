@@ -1,5 +1,4 @@
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// Represents a contract's state variable

@@ -1,5 +1,5 @@
 use crate::{ast::extract_contract_info, types::*, utils::*};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use itertools::Itertools;
 use serde_json::Value;
 use std::collections::HashSet;
