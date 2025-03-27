@@ -23,6 +23,25 @@ pub fn extract_contract_info(ast: &Value) -> Result<DiagramData> {
                 process_functions_and_interactions(source_ast, &mut data)?;
             }
         }
+    } else if let Some(source_units) = ast.get("source_units").and_then(|su| su.as_array()) {
+        // Handle Aderyn format with source_units array
+        for source_unit in source_units {
+            if let Some(_nodes) = source_unit.get("nodes") {
+                // Create a copy of the source_unit to work with for each pass
+                let src_unit_copy = source_unit.clone();
+                
+                // First pass: collect all contracts, state variables, and events
+                collect_contracts_and_variables(&src_unit_copy, &mut data)?;
+
+                // Add default participants
+                data.participants.insert("User".to_string());
+                data.participants.insert("Events".to_string());
+                data.participants.insert("TokenContract".to_string());
+
+                // Second pass: analyze function calls and interactions
+                process_functions_and_interactions(&src_unit_copy, &mut data)?;
+            }
+        }
     } else {
         // Handle legacy format
         // First pass: collect all contracts, state variables, and events
