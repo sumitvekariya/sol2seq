@@ -8,4 +8,7 @@ Cargo.lock
 /samples_output/
 *.log
 /examples/*.md
-/test_output/ 
+/test_output/
+/examples/output/*.md
+*_diagram.md
+*_ast.json 
