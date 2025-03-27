@@ -1,6 +1,6 @@
 [package]
 name = "sol2seq"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Sequence diagram generator for Solidity contracts"
 authors = ["sumitvekariya"]

@@ -2,114 +2,119 @@ use crate::{types::*, utils::*};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::process::Command;
-use tempfile::NamedTempFile;
 
 /// Parse AST JSON and extract contract information
 pub fn extract_contract_info(ast: &Value) -> Result<DiagramData> {
     let mut data = DiagramData::default();
 
-    // First pass: collect all contracts, state variables, and events
-    collect_contracts_and_variables(ast, &mut data)?;
+    // Handle combined-json format
+    if let Some(sources) = ast.get("sources") {
+        for (_file_path, source) in sources.as_object().with_context(|| "sources is not an object")? {
+            if let Some(source_ast) = source.get("AST") {
+                // First pass: collect all contracts, state variables, and events
+                collect_contracts_and_variables(source_ast, &mut data)?;
 
-    // Add default participants
-    data.participants.insert("User".to_string());
-    data.participants.insert("Events".to_string());
-    data.participants.insert("TokenContract".to_string());
+                // Add default participants
+                data.participants.insert("User".to_string());
+                data.participants.insert("Events".to_string());
+                data.participants.insert("TokenContract".to_string());
 
-    // Second pass: analyze function calls and interactions
-    process_functions_and_interactions(ast, &mut data)?;
+                // Second pass: analyze function calls and interactions
+                process_functions_and_interactions(source_ast, &mut data)?;
+            }
+        }
+    } else {
+        // Handle legacy format
+        // First pass: collect all contracts, state variables, and events
+        collect_contracts_and_variables(ast, &mut data)?;
+
+        // Add default participants
+        data.participants.insert("User".to_string());
+        data.participants.insert("Events".to_string());
+        data.participants.insert("TokenContract".to_string());
+
+        // Second pass: analyze function calls and interactions
+        process_functions_and_interactions(ast, &mut data)?;
+    }
 
     Ok(data)
 }
 
 /// Process source units to collect contracts and variables
 fn collect_contracts_and_variables(ast: &Value, data: &mut DiagramData) -> Result<()> {
-    let source_units =
-        ast["source_units"].as_array().with_context(|| "source_units is not an array")?;
+    let nodes = ast["nodes"].as_array().with_context(|| "nodes is not an array")?;
 
-    for source_unit in source_units {
-        let source_file = source_unit["absolutePath"]
-            .as_str()
-            .unwrap_or("unknown")
-            .split('/')
-            .last()
-            .unwrap_or("unknown")
-            .to_string();
+    for node in nodes {
+        if node["nodeType"].as_str() == Some("ContractDefinition") {
+            let contract_name = node["name"].as_str().unwrap_or("Unknown").to_string();
 
-        let nodes = source_unit["nodes"].as_array().with_context(|| "nodes is not an array")?;
+            data.participants.insert(contract_name.clone());
 
-        for node in nodes {
-            if node["nodeType"].as_str() == Some("ContractDefinition") {
-                let contract_name = node["name"].as_str().unwrap_or("Unknown").to_string();
+            // Create contract info
+            let mut contract_info = ContractInfo {
+                name: contract_name.clone(),
+                contract_type: node["contractKind"].as_str().unwrap_or("contract").to_string(),
+                source_file: ast["absolutePath"].as_str().unwrap_or("unknown").to_string(),
+                ..Default::default()
+            };
 
-                data.participants.insert(contract_name.clone());
-
-                // Create contract info
-                let mut contract_info = ContractInfo {
-                    name: contract_name.clone(),
-                    contract_type: node["contractKind"].as_str().unwrap_or("contract").to_string(),
-                    source_file: source_file.clone(),
-                    ..Default::default()
-                };
-
-                // Check inheritance
-                if let Some(base_contracts) = node["baseContracts"].as_array() {
-                    for base in base_contracts {
-                        if let Some(base_name) = base
-                            .get("baseName")
-                            .and_then(|bn| bn.get("name"))
-                            .and_then(|n| n.as_str())
-                        {
-                            contract_info.inherits_from.push(base_name.to_string());
-                            data.contract_relationships.push(ContractRelationship {
-                                source: contract_name.clone(),
-                                target: base_name.to_string(),
-                                relation_type: "inherits".to_string(),
-                            });
-                        }
+            // Check inheritance
+            if let Some(base_contracts) = node["baseContracts"].as_array() {
+                for base in base_contracts {
+                    if let Some(base_name) = base
+                        .get("baseName")
+                        .and_then(|bn| bn.get("name"))
+                        .and_then(|n| n.as_str())
+                    {
+                        contract_info.inherits_from.push(base_name.to_string());
+                        data.contract_relationships.push(ContractRelationship {
+                            source: contract_name.clone(),
+                            target: base_name.to_string(),
+                            relation_type: "inherits".to_string(),
+                        });
                     }
                 }
-
-                // Collect events and state variables
-                if let Some(contract_nodes) = node["nodes"].as_array() {
-                    for contract_node in contract_nodes {
-                        let node_type = contract_node["nodeType"].as_str().unwrap_or("");
-
-                        match node_type {
-                            "EventDefinition" => {
-                                let event_name = contract_node["name"]
-                                    .as_str()
-                                    .unwrap_or("UnknownEvent")
-                                    .to_string();
-                                data.events.push((contract_name.clone(), event_name.clone()));
-                                contract_info.events.push(event_name);
-                            }
-                            "VariableDeclaration" => {
-                                let var_name =
-                                    contract_node["name"].as_str().unwrap_or("unknown").to_string();
-                                let var_type = extract_type_name(&contract_node["typeName"]);
-
-                                contract_info.variables.push((var_name.clone(), var_type.clone()));
-
-                                // Check if this creates a relationship with another contract
-                                if data.participants.contains(&var_type)
-                                    || var_type.to_lowercase().contains("address")
-                                {
-                                    data.contract_relationships.push(ContractRelationship {
-                                        source: contract_name.clone(),
-                                        target: var_type.clone(),
-                                        relation_type: "references".to_string(),
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-
-                // Store the contract info
-                data.contracts.insert(contract_name, contract_info);
             }
+
+            // Collect events and state variables
+            if let Some(contract_nodes) = node["nodes"].as_array() {
+                for contract_node in contract_nodes {
+                    let node_type = contract_node["nodeType"].as_str().unwrap_or("");
+
+                    match node_type {
+                        "EventDefinition" => {
+                            let event_name = contract_node["name"]
+                                .as_str()
+                                .unwrap_or("UnknownEvent")
+                                .to_string();
+                            data.events.push((contract_name.clone(), event_name.clone()));
+                            contract_info.events.push(event_name);
+                        }
+                        "VariableDeclaration" => {
+                            let var_name =
+                                contract_node["name"].as_str().unwrap_or("unknown").to_string();
+                            let var_type = extract_type_name(&contract_node["typeName"]);
+
+                            contract_info.variables.push((var_name.clone(), var_type.clone()));
+
+                            // Check if this creates a relationship with another contract
+                            if data.participants.contains(&var_type)
+                                || var_type.to_lowercase().contains("address")
+                            {
+                                data.contract_relationships.push(ContractRelationship {
+                                    source: contract_name.clone(),
+                                    target: var_type.clone(),
+                                    relation_type: "references".to_string(),
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Store the contract info
+            data.contracts.insert(contract_name, contract_info);
         }
     }
 
@@ -118,140 +123,135 @@ fn collect_contracts_and_variables(ast: &Value, data: &mut DiagramData) -> Resul
 
 /// Process functions and extract interactions
 fn process_functions_and_interactions(ast: &Value, data: &mut DiagramData) -> Result<()> {
-    let source_units =
-        ast["source_units"].as_array().with_context(|| "source_units is not an array")?;
+    let nodes = ast["nodes"].as_array().with_context(|| "nodes is not an array")?;
 
-    for source_unit in source_units {
-        let nodes = source_unit["nodes"].as_array().with_context(|| "nodes is not an array")?;
+    for node in nodes {
+        if node["nodeType"].as_str() == Some("ContractDefinition") {
+            let contract_name = node["name"].as_str().unwrap_or("Unknown").to_string();
 
-        for node in nodes {
-            if node["nodeType"].as_str() == Some("ContractDefinition") {
-                let contract_name = node["name"].as_str().unwrap_or("Unknown").to_string();
-
-                // Process functions
-                if let Some(contract_nodes) = node["nodes"].as_array() {
-                    for contract_node in contract_nodes {
-                        if contract_node["nodeType"].as_str() == Some("FunctionDefinition") {
-                            let function_name = if let Some(name) = contract_node["name"].as_str() {
-                                if name.is_empty()
-                                    && contract_node["kind"].as_str() == Some("constructor")
-                                {
-                                    "constructor".to_string()
-                                } else {
-                                    name.to_string()
-                                }
+            // Process functions
+            if let Some(contract_nodes) = node["nodes"].as_array() {
+                for contract_node in contract_nodes {
+                    if contract_node["nodeType"].as_str() == Some("FunctionDefinition") {
+                        let function_name = if let Some(name) = contract_node["name"].as_str() {
+                            if name.is_empty()
+                                && contract_node["kind"].as_str() == Some("constructor")
+                            {
+                                "constructor".to_string()
                             } else {
-                                continue;
-                            };
-
-                            // Store function info
-                            if let Some(contract_info) = data.contracts.get_mut(&contract_name) {
-                                contract_info.functions.push(function_name.clone());
+                                name.to_string()
                             }
+                        } else {
+                            continue;
+                        };
 
-                            // Add interaction from user to public/external functions
-                            let visibility = contract_node["visibility"].as_str().unwrap_or("");
-                            if visibility == "public" || visibility == "external" {
-                                // Extract function parameters
-                                let mut params = Vec::new();
-                                let mut param_types = Vec::new();
+                        // Store function info
+                        if let Some(contract_info) = data.contracts.get_mut(&contract_name) {
+                            contract_info.functions.push(function_name.clone());
+                        }
 
-                                if let Some(parameters) = contract_node
-                                    .get("parameters")
-                                    .and_then(|p| p.get("parameters"))
-                                    .and_then(|p| p.as_array())
-                                {
-                                    for param in parameters {
-                                        let param_name =
-                                            param["name"].as_str().unwrap_or("").to_string();
+                        // Add interaction from user to public/external functions
+                        let visibility = contract_node["visibility"].as_str().unwrap_or("");
+                        if visibility == "public" || visibility == "external" {
+                            // Extract function parameters
+                            let mut params = Vec::new();
+                            let mut param_types = Vec::new();
 
-                                        // Extract parameter type
-                                        let mut param_type = "unknown".to_string();
-                                        if param.get("typeName").is_some() {
-                                            param_type = extract_type_name(&param["typeName"]);
-                                        }
+                            if let Some(parameters) = contract_node
+                                .get("parameters")
+                                .and_then(|p| p.get("parameters"))
+                                .and_then(|p| p.as_array())
+                            {
+                                for param in parameters {
+                                    let param_name =
+                                        param["name"].as_str().unwrap_or("").to_string();
 
-                                        // Try to get type from typeDescriptions if still unknown
-                                        if param_type == "unknown" {
-                                            if let Some(type_desc) = param.get("typeDescriptions") {
-                                                if let Some(type_str) = type_desc
-                                                    .get("typeString")
-                                                    .and_then(|ts| ts.as_str())
-                                                {
-                                                    param_type = type_str.to_string();
-                                                }
+                                    // Extract parameter type
+                                    let mut param_type = "unknown".to_string();
+                                    if param.get("typeName").is_some() {
+                                        param_type = extract_type_name(&param["typeName"]);
+                                    }
+
+                                    // Try to get type from typeDescriptions if still unknown
+                                    if param_type == "unknown" {
+                                        if let Some(type_desc) = param.get("typeDescriptions") {
+                                            if let Some(type_str) = type_desc
+                                                .get("typeString")
+                                                .and_then(|ts| ts.as_str())
+                                            {
+                                                param_type = type_str.to_string();
                                             }
                                         }
+                                    }
 
-                                        if !param_name.is_empty() {
-                                            params.push(param_name);
-                                            param_types.push(param_type);
-                                        }
+                                    if !param_name.is_empty() {
+                                        params.push(param_name);
+                                        param_types.push(param_type);
                                     }
                                 }
+                            }
 
-                                // Create message with parameter types
-                                let message = if params.is_empty() {
-                                    format!("{}()", function_name)
-                                } else {
-                                    let param_type_str: Vec<String> = params
-                                        .iter()
-                                        .zip(param_types.iter())
-                                        .map(|(name, typ)| format!("{}: {}", name, typ))
-                                        .collect();
-                                    format!("{}({})", function_name, param_type_str.join(", "))
-                                };
+                            // Create message with parameter types
+                            let message = if params.is_empty() {
+                                format!("{}()", function_name)
+                            } else {
+                                let param_type_str: Vec<String> = params
+                                    .iter()
+                                    .zip(param_types.iter())
+                                    .map(|(name, typ)| format!("{}: {}", name, typ))
+                                    .collect();
+                                format!("{}({})", function_name, param_type_str.join(", "))
+                            };
 
-                                // Add note about function purpose
-                                let function_purpose = get_function_purpose(&function_name);
-                                if let Some(purpose) = function_purpose {
+                            // Add note about function purpose
+                            let function_purpose = get_function_purpose(&function_name);
+                            if let Some(purpose) = function_purpose {
+                                data.user_interactions.push(format!(
+                                    "Note over User,{}: {}",
+                                    contract_name, purpose
+                                ));
+                            }
+
+                            // Add user interaction
+                            data.user_interactions
+                                .push(format!("User->>+{}: {}", contract_name, message));
+
+                            // Process function body for internal interactions
+                            if let Some(body) = contract_node.get("body") {
+                                if let Some(statements) =
+                                    body.get("statements").and_then(|s| s.as_array())
+                                {
+                                    let function_key =
+                                        format!("{}.{}", contract_name, function_name);
+                                    let body_interactions = process_function_body(
+                                        &contract_name,
+                                        &function_name,
+                                        statements,
+                                    );
+                                    data.contract_interactions
+                                        .insert(function_key, body_interactions);
+                                }
+                            }
+
+                            // Add return value
+                            let return_type = extract_return_type(contract_node);
+                            if let Some(ret_type) = return_type {
+                                data.user_interactions.push(format!(
+                                    "{}-->>-User: return {}",
+                                    contract_name, ret_type
+                                ));
+                            } else {
+                                // Check for view/pure functions
+                                let state_mutability =
+                                    contract_node["stateMutability"].as_str().unwrap_or("");
+                                if state_mutability == "view" || state_mutability == "pure" {
                                     data.user_interactions.push(format!(
-                                        "Note over User,{}: {}",
-                                        contract_name, purpose
-                                    ));
-                                }
-
-                                // Add user interaction
-                                data.user_interactions
-                                    .push(format!("User->>+{}: {}", contract_name, message));
-
-                                // Process function body for internal interactions
-                                if let Some(body) = contract_node.get("body") {
-                                    if let Some(statements) =
-                                        body.get("statements").and_then(|s| s.as_array())
-                                    {
-                                        let function_key =
-                                            format!("{}.{}", contract_name, function_name);
-                                        let body_interactions = process_function_body(
-                                            &contract_name,
-                                            &function_name,
-                                            statements,
-                                        );
-                                        data.contract_interactions
-                                            .insert(function_key, body_interactions);
-                                    }
-                                }
-
-                                // Add return value
-                                let return_type = extract_return_type(contract_node);
-                                if let Some(ret_type) = return_type {
-                                    data.user_interactions.push(format!(
-                                        "{}-->>-User: return {}",
-                                        contract_name, ret_type
+                                        "{}-->>-User: return (view function)",
+                                        contract_name
                                     ));
                                 } else {
-                                    // Check for view/pure functions
-                                    let state_mutability =
-                                        contract_node["stateMutability"].as_str().unwrap_or("");
-                                    if state_mutability == "view" || state_mutability == "pure" {
-                                        data.user_interactions.push(format!(
-                                            "{}-->>-User: return (view function)",
-                                            contract_name
-                                        ));
-                                    } else {
-                                        data.user_interactions
-                                            .push(format!("{}-->>-User: return", contract_name));
-                                    }
+                                    data.user_interactions
+                                        .push(format!("{}-->>-User: return", contract_name));
                                 }
                             }
                         }
@@ -747,13 +747,13 @@ fn process_function_body(
 ///
 /// The AST JSON representation of the Solidity file
 pub fn process_solidity_file(file_path: &str) -> Result<Value> {
-    // Create a temporary file for the AST output
-    let temp_file = NamedTempFile::new()?;
-    let temp_path = temp_file.path().to_string_lossy().to_string();
-
     // Run solc to generate AST
     let output = Command::new("solc")
-        .args(["--ast-json", file_path, "--output-dir", &temp_path])
+        .args([
+            "--combined-json",
+            "ast",
+            file_path,
+        ])
         .output()
         .with_context(|| format!("Failed to execute solc on {}", file_path))?;
 
@@ -762,21 +762,10 @@ pub fn process_solidity_file(file_path: &str) -> Result<Value> {
         return Err(anyhow::anyhow!("solc failed: {}", stderr));
     }
 
-    // Find the JSON file in the temp directory
-    let ast_file = std::fs::read_dir(&temp_path)?
-        .filter_map(Result::ok)
-        .find(|entry| entry.path().extension().map_or(false, |ext| ext == "json"))
-        .with_context(|| "No AST JSON file generated")?;
-
-    // Read the JSON file
-    let ast_content = std::fs::read_to_string(ast_file.path())?;
-
-    // Parse the JSON
+    // Parse the JSON output
+    let ast_content = String::from_utf8_lossy(&output.stdout);
     let ast_json: Value = serde_json::from_str(&ast_content)?;
 
-    // Format for our use
-    let mut formatted_ast = serde_json::Map::new();
-    formatted_ast.insert("source_units".to_string(), serde_json::Value::Array(vec![ast_json]));
-
-    Ok(serde_json::Value::Object(formatted_ast))
+    // The AST is already in the correct format, just return it
+    Ok(ast_json)
 }

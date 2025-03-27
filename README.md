@@ -25,51 +25,78 @@ cargo install --path .
 ## CLI Usage
 
 ```bash
+# Generate a sequence diagram from Solidity source files directly
+sol2seq source Contract.sol Library.sol output_diagram.md
+
 # Generate a sequence diagram from an AST JSON file
-sol2seq path/to/ast.json diagram.md
+sol2seq ast path/to/ast.json output_diagram.md
 
 # Generate with lighter colors
-sol2seq --light-colors path/to/ast.json diagram.md
-
-# Process Solidity source files directly
-sol2seq --source-files Contract.sol Library.sol diagram.md
+sol2seq source --light-colors Contract.sol output_diagram.md
+sol2seq ast --light-colors path/to/ast.json output_diagram.md
 ```
 
 ### Command-Line Arguments
 
 ```
-Usage: sol2seq [OPTIONS] <AST_FILE> [OUTPUT_FILE]
+Usage: sol2seq [OPTIONS] <COMMAND>
 
-Arguments:
-  <AST_FILE>
-          AST JSON file path
-          Required: The path to the Solidity Abstract Syntax Tree (AST) JSON file
-
-  [OUTPUT_FILE]
-          Output file path
-          Optional: If not provided, the diagram will be printed to stdout
+Commands:
+  source  Generate diagram from Solidity source files
+  ast     Generate diagram from AST JSON file
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
-  -l, --light-colors
-          Use lighter colors for the sequence diagram
-          Makes the diagram more readable on light backgrounds
+  -l, --light-colors  Use lighter colors for the sequence diagram
+  -h, --help          Print help information
+  -V, --version       Print version information
+```
 
-  -s, --source-files <SOURCE_FILES>
-          Solidity source files to process directly
-          Allows processing .sol files without pre-generating an AST JSON file
+#### Source Command
 
-  -h, --help
-          Print help information
+```
+Usage: sol2seq source [OPTIONS] <SOURCE_FILES>... [OUTPUT_FILE]
 
-  -V, --version
-          Print version information
+Arguments:
+  <SOURCE_FILES>...  Solidity source files to process
+  [OUTPUT_FILE]      Output file path (optional, will print to stdout if not provided)
+
+Options:
+  -l, --light-colors  Use lighter colors for the sequence diagram
+  -h, --help          Print help information
+```
+
+#### AST Command
+
+```
+Usage: sol2seq ast [OPTIONS] <AST_FILE> [OUTPUT_FILE]
+
+Arguments:
+  <AST_FILE>       AST JSON file path
+  [OUTPUT_FILE]    Output file path (optional, will print to stdout if not provided)
+
+Options:
+  -l, --light-colors  Use lighter colors for the sequence diagram
+  -h, --help          Print help information
+```
+
+### Generating AST JSON
+
+If you prefer to generate the AST JSON manually and then use it with sol2seq, you can use the Solidity compiler:
+
+```bash
+# Generate AST JSON for a Solidity file
+solc --combined-json ast Contract.sol > contract_ast.json
+
+# Then use sol2seq to generate a sequence diagram
+sol2seq ast contract_ast.json diagram.md
 ```
 
 ## Library Usage
 
 ```rust
 use anyhow::Result;
-use sol2seq::{generate_diagram_from_file, Config};
+use sol2seq::{generate_diagram_from_file, generate_diagram_from_sources, Config};
 
 fn main() -> Result<()> {
     // Create a configuration
@@ -79,9 +106,14 @@ fn main() -> Result<()> {
     };
 
     // Generate diagram from AST file
-    let diagram = generate_diagram_from_file("path/to/ast.json", config)?;
+    let diagram = generate_diagram_from_file("path/to/ast.json", config.clone())?;
+    println!("AST diagram generated successfully!");
     
-    println!("Diagram generated successfully!");
+    // Generate diagram directly from Solidity source files
+    let source_files = vec!["Contract.sol", "Library.sol"];
+    let diagram = generate_diagram_from_sources(&source_files, config)?;
+    println!("Source files diagram generated successfully!");
+    
     Ok(())
 }
 ```
@@ -256,6 +288,31 @@ fn main() -> Result<()> {
 }
 ```
 
+### Command Line Examples
+
+**Generate diagram from Solidity source files:**
+
+```bash
+# Basic usage
+sol2seq source SimpleStorage.sol output.md
+
+# Process multiple files
+sol2seq source Token.sol Vault.sol Governance.sol protocol_diagram.md
+
+# Use lighter colors for better visibility on light backgrounds
+sol2seq source --light-colors SimpleStorage.sol light_theme.md
+```
+
+**Generate diagram from AST JSON file:**
+
+```bash
+# Generate the AST JSON using solc
+solc --combined-json ast SimpleStorage.sol > storage_ast.json
+
+# Generate diagram from the AST
+sol2seq ast storage_ast.json diagram.md
+```
+
 ### Sample Output
 
 The generated Mermaid diagram markdown can be rendered by any Mermaid-compatible renderer, such as:
@@ -291,7 +348,16 @@ sequenceDiagram
 
 This tool is designed to work seamlessly with [Aderyn](https://github.com/cyfrin/aderyn), a Solidity static analyzer developed by Cyfrin. Integration enables automated generation of sequence diagrams as part of your smart contract analysis workflow.
 
-### Integration Steps
+### Integration Options
+
+#### Option 1: Direct Integration with Solidity Source Files (Recommended)
+
+```bash
+# Generate sequence diagrams directly from your Solidity source files
+sol2seq source /path/to/contracts/*.sol contract_diagram.md
+```
+
+#### Option 2: Use with Aderyn-generated AST
 
 1. **Install Aderyn**: Follow the installation instructions at the [Aderyn repository](https://github.com/cyfrin/aderyn).
 
@@ -302,12 +368,12 @@ This tool is designed to work seamlessly with [Aderyn](https://github.com/cyfrin
 
 3. **Use sol2seq with the Generated AST**: After Aderyn generates the AST JSON file, use sol2seq to create sequence diagrams.
    ```bash
-   sol2seq reports/ast.json contract_diagram.md
+   sol2seq ast reports/ast.json contract_diagram.md
    ```
 
 ### Automated Workflow
 
-You can also automate the process by creating a script that:
+You can automate the process by creating a script that:
 1. Runs Aderyn to analyze contracts
 2. Extracts the AST JSON
 3. Generates sequence diagrams with sol2seq
@@ -320,9 +386,18 @@ Example script:
 aderyn ./contracts --ast-json
 
 # Generate sequence diagram
-sol2seq ./reports/ast.json ./reports/sequence_diagram.md --light-colors
+sol2seq ast ./reports/ast.json ./reports/sequence_diagram.md --light-colors
 
 echo "Analysis and sequence diagram generation completed"
+```
+
+Alternatively, you can generate sequence diagrams directly from your source files:
+```bash
+#!/bin/bash
+# Generate sequence diagram directly from Solidity files
+sol2seq source ./contracts/*.sol ./reports/sequence_diagram.md
+
+echo "Sequence diagram generation completed"
 ```
 
 ## License
