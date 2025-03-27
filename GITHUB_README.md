@@ -10,6 +10,7 @@ A Rust library and CLI tool for generating sequence diagrams from Solidity smart
 
 - Generate Mermaid sequence diagrams from Solidity AST JSON files
 - Process Solidity source files directly
+- Supports both solc-generated and Aderyn-generated AST formats
 - Visualize contract interactions, function calls, and events
 - Customize diagram appearance with light/dark themes
 - Use as a library in your Rust projects or as a CLI tool
@@ -36,13 +37,13 @@ cargo install --path .
 
 ```bash
 # Generate a sequence diagram from an AST JSON file
-sol2seq path/to/ast.json diagram.md
+sol2seq ast path/to/ast.json diagram.md
 
 # Generate with lighter colors
-sol2seq --light-colors path/to/ast.json diagram.md
+sol2seq --light-colors ast path/to/ast.json diagram.md
 
 # Process Solidity source files directly
-sol2seq --source-files Contract.sol Library.sol diagram.md
+sol2seq source Contract.sol Library.sol diagram.md
 ```
 
 ### Library Usage
@@ -72,7 +73,7 @@ For complete documentation, please visit [docs.rs/sol2seq](https://docs.rs/sol2s
 
 ## Example Output
 
-The generated sequence diagrams look like this:
+The generated sequence diagrams use Mermaid syntax and can be viewed in markdown editors that support Mermaid (like GitHub, VS Code with the Mermaid extension, etc.). Here's an example of what the output looks like:
 
 ```mermaid
 sequenceDiagram
@@ -80,19 +81,51 @@ sequenceDiagram
     autonumber
     
     participant User as "External User"
-    participant Token as "Token Contract"
-    participant Vault as "Vault Contract"
+    participant Token as "TokenContract<br/>(name: string,<br/>symbol: string,<br/>decimals: uint8,<br/>totalSupply: uint256)"
+    participant SimpleStorage as "SimpleStorage<br/>(value: uint256)"
     participant Events as "Blockchain Events"
     
     %% User Interactions Section
-    User->>Token: transfer(address to, uint256 amount)
-    Token-->>User: returns success
-    User->>Vault: deposit(uint256 amount)
-    Vault->>Token: transferFrom(user, vault, amount)
-    Token-->>Vault: returns success
-    Vault->>Events: Emit Deposit(user, amount)
-    Vault-->>User: returns success
+    Note over User: User Interactions
+    
+    Note over User,Token: Contract initialization
+    User->>+Token: constructor(_name: string, _symbol: string, _decimals: uint8, _initialSupply: uint256, _storageAddress: address)
+    
+    Note over User,Token: Transfer tokens
+    User->>+Token: transfer(to: address, value: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: approve(spender: address, value: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: transferFrom(from: address, to: address, value: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: updateStorage(newValue: uint256)
+    Token->>SimpleStorage: setValue(newValue: uint256)
+    Token->>Events: Emit StorageUpdated(newValue: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: getStorageValue()
+    Token->>SimpleStorage: getValue()
+    SimpleStorage-->>Token: returns uint256
+    Token-->>-User: returns uint256
+    
+    %% Event Definitions
+    Note over Events: Event Definitions
+    Note over Token,Events: Event: Transfer(from: address, to: address, value: uint256)
+    Note over Token,Events: Event: Approval(owner: address, spender: address, value: uint256)
+    Note over Token,Events: Event: StorageUpdated(newValue: uint256)
+    Note over SimpleStorage,Events: Event: ValueSet(newValue: uint256)
 ```
+
+The diagram clearly shows:
+- Contract participants with their state variables
+- User interactions with contracts
+- Contract-to-contract interactions
+- Event emissions
+- Return values
+- Categorized sections with notes
 
 ## Integration with Aderyn
 
@@ -103,7 +136,7 @@ This tool integrates with [Aderyn](https://github.com/cyfrin/aderyn), a Solidity
 aderyn ./contracts --ast-json
 
 # Generate sequence diagram
-sol2seq ./reports/ast.json ./reports/sequence_diagram.md --light-colors
+sol2seq ast ./reports/combined_ast.json ./reports/sequence_diagram.md --light-colors
 ```
 
 ## License

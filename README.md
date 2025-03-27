@@ -165,3 +165,66 @@ pub fn generate_diagram_from_sources<P: AsRef<std::path::Path>>(
     config: Config,
 ) -> Result<String>
 ```
+
+**Parameters:**
+- `source_files`: Paths to Solidity source files.
+- `config`: Configuration for diagram generation.
+
+**Returns:**
+- The generated diagram as a string.
+
+## Example Output
+
+The generated sequence diagrams use Mermaid syntax and can be viewed in markdown editors that support Mermaid (like GitHub, VS Code with the Mermaid extension, etc.). Here's an example of what the output looks like:
+
+```mermaid
+sequenceDiagram
+    title Smart Contract Interaction Sequence Diagram
+    autonumber
+    
+    participant User as "External User"
+    participant Token as "TokenContract<br/>(name: string,<br/>symbol: string,<br/>decimals: uint8,<br/>totalSupply: uint256)"
+    participant SimpleStorage as "SimpleStorage<br/>(value: uint256)"
+    participant Events as "Blockchain Events"
+    
+    %% User Interactions Section
+    Note over User: User Interactions
+    
+    Note over User,Token: Contract initialization
+    User->>+Token: constructor(_name: string, _symbol: string, _decimals: uint8, _initialSupply: uint256, _storageAddress: address)
+    
+    Note over User,Token: Transfer tokens
+    User->>+Token: transfer(to: address, value: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: approve(spender: address, value: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: transferFrom(from: address, to: address, value: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: updateStorage(newValue: uint256)
+    Token->>SimpleStorage: setValue(newValue: uint256)
+    Token->>Events: Emit StorageUpdated(newValue: uint256)
+    Token-->>-User: returns bool: success
+    
+    User->>+Token: getStorageValue()
+    Token->>SimpleStorage: getValue()
+    SimpleStorage-->>Token: returns uint256
+    Token-->>-User: returns uint256
+    
+    %% Event Definitions
+    Note over Events: Event Definitions
+    Note over Token,Events: Event: Transfer(from: address, to: address, value: uint256)
+    Note over Token,Events: Event: Approval(owner: address, spender: address, value: uint256)
+    Note over Token,Events: Event: StorageUpdated(newValue: uint256)
+    Note over SimpleStorage,Events: Event: ValueSet(newValue: uint256)
+```
+
+The diagram clearly shows:
+- Contract participants with their state variables
+- User interactions with contracts
+- Contract-to-contract interactions
+- Event emissions
+- Return values
+- Categorized sections with notes
