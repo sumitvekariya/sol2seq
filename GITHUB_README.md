@@ -44,6 +44,12 @@ sol2seq --light-colors ast path/to/ast.json diagram.md
 
 # Process Solidity source files directly
 sol2seq source Contract.sol Library.sol diagram.md
+
+# Process a directory of Solidity files (recursively finds all .sol files)
+sol2seq source ./contracts diagram.md
+
+# Process multiple files and directories
+sol2seq source Contract.sol ./contracts ./lib/interfaces diagram.md
 ```
 
 ### Library Usage

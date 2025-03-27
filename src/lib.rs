@@ -45,14 +45,34 @@ mod types;
 mod utils;
 
 use anyhow::{Context, Result};
-use std::{fs, path::PathBuf};
+use std::{fs, path::{Path, PathBuf}};
 
-// Re-export types for public API
-pub use diagram::generate_sequence_diagram;
-pub use types::{
-    ContractInfo, ContractRelationship, DiagramData, Interaction, InteractionType, Parameter,
-    StateVariable,
-};
+/// Recursively find all Solidity files in a directory
+fn find_solidity_files(dir_path: &Path) -> Result<Vec<PathBuf>> {
+    let mut sol_files = Vec::new();
+    
+    if dir_path.is_dir() {
+        for entry in fs::read_dir(dir_path)
+            .with_context(|| format!("Failed to read directory: {}", dir_path.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            
+            if path.is_dir() {
+                // Recursively search subdirectories
+                let mut sub_files = find_solidity_files(&path)?;
+                sol_files.append(&mut sub_files);
+            } else if let Some(ext) = path.extension() {
+                // Check if file has .sol extension
+                if ext == "sol" {
+                    sol_files.push(path);
+                }
+            }
+        }
+    }
+    
+    Ok(sol_files)
+}
 
 /// Configuration for diagram generation
 #[derive(Debug, Clone)]
@@ -120,7 +140,7 @@ pub fn generate_diagram_from_file<P: AsRef<std::path::Path>>(
 ///
 /// # Arguments
 ///
-/// * `source_files` - Paths to Solidity source files
+/// * `source_paths` - Paths to Solidity source files or directories
 /// * `config` - Configuration for diagram generation
 ///
 /// # Returns
@@ -133,21 +153,44 @@ pub fn generate_diagram_from_file<P: AsRef<std::path::Path>>(
 /// use sol2seq::{Config, generate_diagram_from_sources};
 ///
 /// let config = Config::default();
-/// let source_files = vec!["Contract.sol", "Library.sol"];
-/// match generate_diagram_from_sources(&source_files, config) {
+/// let source_paths = vec!["Contract.sol", "Library.sol"];
+/// match generate_diagram_from_sources(&source_paths, config) {
 ///     Ok(diagram) => println!("Generated diagram: {}", diagram),
 ///     Err(e) => eprintln!("Error: {}", e),
 /// }
 /// ```
 pub fn generate_diagram_from_sources<P: AsRef<std::path::Path>>(
-    source_files: &[P],
+    source_paths: &[P],
     config: Config,
 ) -> Result<String> {
     // Process each Solidity file and combine ASTs
     let mut combined_ast = serde_json::Value::Object(serde_json::Map::new());
+    let mut all_source_files = Vec::new();
 
-    for file_path in source_files {
-        let ast = ast::process_solidity_file(file_path.as_ref().to_str().unwrap())?;
+    // First, collect all Solidity files from provided paths (could be files or directories)
+    for path in source_paths {
+        let path = path.as_ref();
+        if path.is_dir() {
+            // If it's a directory, find all Solidity files inside it
+            let mut sol_files = find_solidity_files(path)?;
+            all_source_files.append(&mut sol_files);
+        } else {
+            // If it's a file, add it directly (assuming it's a Solidity file)
+            all_source_files.push(path.to_path_buf());
+        }
+    }
+
+    if all_source_files.is_empty() {
+        return Err(anyhow::anyhow!("No Solidity files found in the provided paths"));
+    }
+
+    // Process each Solidity file and combine ASTs
+    for file_path in &all_source_files {
+        let file_str = file_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!("Failed to convert path to string: {}", file_path.display())
+        })?;
+        
+        let ast = ast::process_solidity_file(file_str)?;
 
         // Merge with combined AST
         utils::merge_ast_json(&mut combined_ast, &ast)?;
@@ -164,3 +207,10 @@ pub fn generate_diagram_from_sources<P: AsRef<std::path::Path>>(
 
     Ok(diagram)
 }
+
+// Re-export types for public API
+pub use diagram::generate_sequence_diagram;
+pub use types::{
+    ContractInfo, ContractRelationship, DiagramData, Interaction, InteractionType, Parameter,
+    StateVariable,
+};

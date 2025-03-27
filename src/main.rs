@@ -31,11 +31,11 @@ enum Commands {
         /// Output file path (optional, will print to stdout if not provided)
         output_file: Option<PathBuf>,
     },
-    /// Generate diagram from Solidity source files
+    /// Generate diagram from Solidity source files or directories
     Source {
-        /// Solidity source files to process
+        /// Solidity source files or directories to process (directories will be recursively searched for .sol files)
         #[clap(required = true)]
-        source_files: Vec<PathBuf>,
+        source_paths: Vec<PathBuf>,
         /// Output file path (optional, will print to stdout if not provided)
         output_file: Option<PathBuf>,
     },
@@ -64,8 +64,8 @@ fn main() -> Result<()> {
         Commands::Ast { ast_file, .. } => {
             sol2seq::generate_diagram_from_file(ast_file, config)?
         }
-        Commands::Source { source_files, .. } => {
-            sol2seq::generate_diagram_from_sources(&source_files, config)?
+        Commands::Source { source_paths, .. } => {
+            sol2seq::generate_diagram_from_sources(&source_paths, config)?
         }
     };
 

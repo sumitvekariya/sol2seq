@@ -29,6 +29,12 @@ cargo install --path .
 # Generate a sequence diagram from Solidity source files directly
 sol2seq source Contract.sol Library.sol output_diagram.md
 
+# Generate a sequence diagram from a directory of Solidity files
+sol2seq source ./contracts output_diagram.md
+
+# Process multiple files and directories
+sol2seq source Contract.sol ./contracts ./lib/interfaces output_diagram.md
+
 # Generate a sequence diagram from an AST JSON file
 sol2seq ast path/to/ast.json output_diagram.md
 
@@ -126,14 +132,19 @@ fn main() -> Result<()> {
     
     // Generate diagram directly from Solidity source files
     let source_files = vec!["Contract.sol", "Library.sol"];
-    let diagram = generate_diagram_from_sources(&source_files, config)?;
+    let diagram = generate_diagram_from_sources(&source_files, config.clone())?;
     println!("Source files diagram generated successfully!");
+    
+    // Generate diagram from a directory of Solidity files
+    let source_dirs = vec!["./contracts"];
+    let diagram = generate_diagram_from_sources(&source_dirs, config)?;
+    println!("Directory diagram generated successfully!");
     
     Ok(())
 }
 ```
 
-### API Reference
+## API Reference
 
 The library provides the following main functions:
 
@@ -157,17 +168,17 @@ pub fn generate_diagram_from_file<P: AsRef<std::path::Path>>(
 
 #### `generate_diagram_from_sources`
 
-Generates a sequence diagram directly from Solidity source files.
+Generates a sequence diagram directly from Solidity source files or directories.
 
 ```rust
 pub fn generate_diagram_from_sources<P: AsRef<std::path::Path>>(
-    source_files: &[P],
+    source_paths: &[P],
     config: Config,
 ) -> Result<String>
 ```
 
 **Parameters:**
-- `source_files`: Paths to Solidity source files.
+- `source_paths`: Paths to Solidity source files or directories. Directories will be recursively searched for .sol files.
 - `config`: Configuration for diagram generation.
 
 **Returns:**
