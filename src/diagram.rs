@@ -6,8 +6,18 @@ use std::collections::HashSet;
 
 /// Generate a Mermaid sequence diagram from AST JSON
 pub fn generate_sequence_diagram(ast: &Value, light_colors: bool) -> Result<String> {
+    let config = crate::Config {
+        light_colors,
+        output_file: None,
+        show_storage_updates: true,
+    };
+    generate_sequence_diagram_with_config(ast, config)
+}
+
+/// Generate a Mermaid sequence diagram from AST JSON with full configuration
+pub fn generate_sequence_diagram_with_config(ast: &Value, config: crate::Config) -> Result<String> {
     // Extract contract information
-    let data = extract_contract_info(ast)?;
+    let data = extract_contract_info(ast, config.show_storage_updates)?;
 
     // Generate diagram content
     let mut diagram = Vec::new();
@@ -20,7 +30,7 @@ pub fn generate_sequence_diagram(ast: &Value, light_colors: bool) -> Result<Stri
     diagram.push("".to_string());
 
     // Add visual styling with theme
-    add_theme_config(&mut diagram, light_colors);
+    add_theme_config(&mut diagram, config.light_colors);
 
     // Format participants for the diagram - ensure User is first
     let ordered_participants = order_participants(&data.participants);
@@ -32,7 +42,7 @@ pub fn generate_sequence_diagram(ast: &Value, light_colors: bool) -> Result<Stri
     diagram.push("".to_string());
 
     // Add title and section separators
-    add_section_title(&mut diagram, "User Interactions", light_colors);
+    add_section_title(&mut diagram, "User Interactions", config.light_colors);
 
     // Add user interactions
     diagram.extend(data.user_interactions);
@@ -40,7 +50,7 @@ pub fn generate_sequence_diagram(ast: &Value, light_colors: bool) -> Result<Stri
     // Add contract interactions
     if !data.contract_interactions.is_empty() {
         diagram.push("".to_string());
-        add_section_title(&mut diagram, "Contract-to-Contract Interactions", light_colors);
+        add_section_title(&mut diagram, "Contract-to-Contract Interactions", config.light_colors);
 
         // Add contract interactions grouped by function
         for (function_key, interactions_list) in data.contract_interactions.iter() {
@@ -59,7 +69,7 @@ pub fn generate_sequence_diagram(ast: &Value, light_colors: bool) -> Result<Stri
     // Add event notes
     if !data.events.is_empty() {
         diagram.push("".to_string());
-        add_section_title(&mut diagram, "Event Definitions", light_colors);
+        add_section_title(&mut diagram, "Event Definitions", config.light_colors);
 
         for (contract, event) in &data.events {
             diagram.push(format!("Note over {},{}: Event: {}", contract, contract, event));
@@ -69,7 +79,7 @@ pub fn generate_sequence_diagram(ast: &Value, light_colors: bool) -> Result<Stri
     // Add contract overview/relationships
     if !data.contracts.is_empty() {
         diagram.push("".to_string());
-        add_section_title(&mut diagram, "Contract Relationships", light_colors);
+        add_section_title(&mut diagram, "Contract Relationships", config.light_colors);
 
         // Add function summaries
         for (contract_name, info) in &data.contracts {
@@ -123,7 +133,7 @@ pub fn generate_sequence_diagram(ast: &Value, light_colors: bool) -> Result<Stri
     }
 
     // Add a legend at the end
-    add_legend(&mut diagram, light_colors);
+    add_legend(&mut diagram, config.light_colors);
 
     // Close the diagram
     diagram.push("```".to_string());

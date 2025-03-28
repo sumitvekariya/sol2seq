@@ -20,6 +20,10 @@ struct Args {
     /// Use lighter colors for diagram
     #[clap(long, short, action)]
     light_colors: bool,
+    
+    /// Disable storage update notes in the diagram
+    #[clap(long, action)]
+    no_storage_updates: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -37,6 +41,7 @@ enum Commands {
         #[clap(required = true)]
         source_paths: Vec<PathBuf>,
         /// Output file path (optional, will print to stdout if not provided)
+        #[clap(last = true)]
         output_file: Option<PathBuf>,
     },
 }
@@ -57,6 +62,7 @@ fn main() -> Result<()> {
             Commands::Ast { output_file, .. } => output_file.clone(),
             Commands::Source { output_file, .. } => output_file.clone(),
         },
+        show_storage_updates: !args.no_storage_updates,
     };
 
     // Generate the diagram

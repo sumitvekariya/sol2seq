@@ -12,6 +12,7 @@ A Rust library and CLI tool for generating sequence diagrams from Solidity smart
 - Process Solidity source files directly
 - Supports both solc-generated and Aderyn-generated AST formats
 - Visualize contract interactions, function calls, and events
+- Highlight state variable modifications with storage update notes
 - Customize diagram appearance with light/dark themes
 - Use as a library in your Rust projects or as a CLI tool
 
@@ -50,6 +51,9 @@ sol2seq source ./contracts diagram.md
 
 # Process multiple files and directories
 sol2seq source Contract.sol ./contracts ./lib/interfaces diagram.md
+
+# Generate diagram without storage update notes
+sol2seq --no-storage-updates source Contract.sol diagram.md
 ```
 
 ### Library Usage
@@ -99,6 +103,8 @@ sequenceDiagram
     
     Note over User,Token: Transfer tokens
     User->>+Token: transfer(to: address, value: uint256)
+    Note right of Token: Storage update: balanceOf[msg.sender] -= value
+    Note right of Token: Storage update: balanceOf[to] += value
     Token-->>-User: returns bool: success
     
     User->>+Token: approve(spender: address, value: uint256)

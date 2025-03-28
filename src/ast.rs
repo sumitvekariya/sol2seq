@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::process::Command;
 
 /// Parse AST JSON and extract contract information
-pub fn extract_contract_info(ast: &Value) -> Result<DiagramData> {
+pub fn extract_contract_info(ast: &Value, show_storage_updates: bool) -> Result<DiagramData> {
     let mut data = DiagramData::default();
 
     // Handle combined-json format
@@ -20,7 +20,7 @@ pub fn extract_contract_info(ast: &Value) -> Result<DiagramData> {
                 data.participants.insert("TokenContract".to_string());
 
                 // Second pass: analyze function calls and interactions
-                process_functions_and_interactions(source_ast, &mut data)?;
+                process_functions_and_interactions(source_ast, &mut data, show_storage_updates)?;
             }
         }
     } else if let Some(source_units) = ast.get("source_units").and_then(|su| su.as_array()) {
@@ -39,7 +39,7 @@ pub fn extract_contract_info(ast: &Value) -> Result<DiagramData> {
                 data.participants.insert("TokenContract".to_string());
 
                 // Second pass: analyze function calls and interactions
-                process_functions_and_interactions(&src_unit_copy, &mut data)?;
+                process_functions_and_interactions(&src_unit_copy, &mut data, show_storage_updates)?;
             }
         }
     } else {
@@ -53,7 +53,7 @@ pub fn extract_contract_info(ast: &Value) -> Result<DiagramData> {
         data.participants.insert("TokenContract".to_string());
 
         // Second pass: analyze function calls and interactions
-        process_functions_and_interactions(ast, &mut data)?;
+        process_functions_and_interactions(ast, &mut data, show_storage_updates)?;
     }
 
     Ok(data)
@@ -141,7 +141,7 @@ fn collect_contracts_and_variables(ast: &Value, data: &mut DiagramData) -> Resul
 }
 
 /// Process functions and extract interactions
-fn process_functions_and_interactions(ast: &Value, data: &mut DiagramData) -> Result<()> {
+fn process_functions_and_interactions(ast: &Value, data: &mut DiagramData, show_storage_updates: bool) -> Result<()> {
     let nodes = ast["nodes"].as_array().with_context(|| "nodes is not an array")?;
 
     for node in nodes {
@@ -246,6 +246,8 @@ fn process_functions_and_interactions(ast: &Value, data: &mut DiagramData) -> Re
                                         &contract_name,
                                         &function_name,
                                         statements,
+                                        data,
+                                        show_storage_updates,
                                     );
                                     data.contract_interactions
                                         .insert(function_key, body_interactions);
@@ -288,6 +290,8 @@ fn process_function_body(
     contract_name: &str,
     function_name: &str,
     statements: &[Value],
+    data: &DiagramData,
+    show_storage_updates: bool,
 ) -> Vec<String> {
     let mut interactions = Vec::new();
 
@@ -328,14 +332,14 @@ fn process_function_body(
                     if let Some(body_statements) = body.get("statements").and_then(|s| s.as_array())
                     {
                         let loop_body =
-                            process_function_body(contract_name, function_name, body_statements);
+                            process_function_body(contract_name, function_name, body_statements, data, show_storage_updates);
                         for line in loop_body {
                             interactions.push(format!("    {}", line));
                         }
                     } else if body.get("nodeType").is_some() {
                         // Handle single statement body
                         let loop_body =
-                            process_function_body(contract_name, function_name, &[body.clone()]);
+                            process_function_body(contract_name, function_name, &[body.clone()], data, show_storage_updates);
                         for line in loop_body {
                             interactions.push(format!("    {}", line));
                         }
@@ -382,14 +386,14 @@ fn process_function_body(
                         true_body.get("statements").and_then(|s| s.as_array())
                     {
                         let body =
-                            process_function_body(contract_name, function_name, true_statements);
+                            process_function_body(contract_name, function_name, true_statements, data, show_storage_updates);
                         for line in body {
                             interactions.push(format!("    {}", line));
                         }
                     } else if true_body.get("nodeType").is_some() {
                         let body = process_function_body(contract_name, function_name, &[
                             true_body.clone(),
-                        ]);
+                        ], data, show_storage_updates);
                         for line in body {
                             interactions.push(format!("    {}", line));
                         }
@@ -408,6 +412,8 @@ fn process_function_body(
                                 contract_name,
                                 function_name,
                                 false_statements,
+                                data,
+                                show_storage_updates,
                             );
                             for line in body {
                                 interactions.push(format!("    {}", line));
@@ -415,7 +421,7 @@ fn process_function_body(
                         } else if false_body.get("nodeType").is_some() {
                             let body = process_function_body(contract_name, function_name, &[
                                 false_body.clone(),
-                            ]);
+                            ], data, show_storage_updates);
                             for line in body {
                                 interactions.push(format!("    {}", line));
                             }
@@ -475,9 +481,102 @@ fn process_function_body(
                 }
             }
             "ExpressionStatement" => {
-                // Handle function calls
+                // Handle function calls and assignments
                 if let Some(expression) = statement.get("expression") {
-                    if expression["nodeType"].as_str() == Some("FunctionCall") {
+                    // Handle assignments (storage updates)
+                    if expression["nodeType"].as_str() == Some("Assignment") {
+                        if let Some(left) = expression.get("leftHandSide") {
+                            // Look for state variable assignments (could be direct or through member access)
+                            let mut var_name = None;
+                            let mut is_state_var = false;
+                            
+                            // Direct state variable assignment
+                            if left["nodeType"].as_str() == Some("Identifier") {
+                                if let Some(name) = left.get("name").and_then(|n| n.as_str()) {
+                                    var_name = Some(name.to_string());
+                                    
+                                    // Check if this is a state variable by seeing if it's a contract variable
+                                    for (_contract_name, contract_info) in &data.contracts {
+                                        for (var, _) in &contract_info.variables {
+                                            if var == name {
+                                                is_state_var = true;
+                                                break;
+                                            }
+                                        }
+                                        if is_state_var {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            // Member access (e.g., this.balance, mapping[key], etc.)
+                            else if left["nodeType"].as_str() == Some("MemberAccess") {
+                                if let Some(member_name) = left.get("memberName").and_then(|n| n.as_str()) {
+                                    var_name = Some(member_name.to_string());
+                                    
+                                    // Check if it's a state variable member
+                                    if let Some(expr) = left.get("expression") {
+                                        if expr["nodeType"].as_str() == Some("Identifier") {
+                                            if expr.get("name").and_then(|n| n.as_str()) == Some("this") {
+                                                is_state_var = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Indexed access (e.g., array[index], mapping[key])
+                            else if left["nodeType"].as_str() == Some("IndexAccess") {
+                                if let Some(base) = left.get("baseExpression") {
+                                    if base["nodeType"].as_str() == Some("Identifier") {
+                                        if let Some(name) = base.get("name").and_then(|n| n.as_str()) {
+                                            var_name = Some(format!("{}[index]", name));
+                                            
+                                            // Check if this is a state variable
+                                            for (_contract_name, contract_info) in &data.contracts {
+                                                for (var, _) in &contract_info.variables {
+                                                    if var == name {
+                                                        is_state_var = true;
+                                                        break;
+                                                    }
+                                                }
+                                                if is_state_var {
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // If we have a state variable assignment, add it to interactions
+                            if let Some(name) = var_name {
+                                if is_state_var && show_storage_updates {
+                                    let operator = expression["operator"].as_str().unwrap_or("=");
+                                    
+                                    // Get the right side expression
+                                    let mut value_str = "new value".to_string();
+                                    if let Some(right) = expression.get("rightHandSide") {
+                                        if right["nodeType"].as_str() == Some("Identifier") {
+                                            if let Some(right_name) = right.get("name").and_then(|n| n.as_str()) {
+                                                value_str = right_name.to_string();
+                                            }
+                                        } else if right["nodeType"].as_str() == Some("Literal") {
+                                            if let Some(value) = right.get("value").map(|v| v.to_string()) {
+                                                value_str = value;
+                                            }
+                                        }
+                                    }
+                                    
+                                    interactions.push(format!(
+                                        "Note right of {}: Storage update: {} {} {}",
+                                        contract_name, name, operator, value_str
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    // Handle function calls
+                    else if expression["nodeType"].as_str() == Some("FunctionCall") {
                         if let Some(call_expr) = expression.get("expression") {
                             if call_expr["nodeType"].as_str() == Some("MemberAccess") {
                                 let member_name =

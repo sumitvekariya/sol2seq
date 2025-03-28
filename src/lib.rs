@@ -82,11 +82,18 @@ pub struct Config {
 
     /// Output file path (None for stdout)
     pub output_file: Option<PathBuf>,
+    
+    /// Include storage updates in the diagram
+    pub show_storage_updates: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { light_colors: false, output_file: None }
+        Self { 
+            light_colors: false, 
+            output_file: None,
+            show_storage_updates: true,
+        }
     }
 }
 
@@ -125,7 +132,7 @@ pub fn generate_diagram_from_file<P: AsRef<std::path::Path>>(
         serde_json::from_str(&ast_content).with_context(|| "Failed to parse AST JSON")?;
 
     // Generate sequence diagram
-    let diagram = generate_sequence_diagram(&ast_json, config.light_colors)?;
+    let diagram = diagram::generate_sequence_diagram_with_config(&ast_json, config.clone())?;
 
     // Save to file if specified
     if let Some(output_path) = config.output_file {
@@ -197,7 +204,7 @@ pub fn generate_diagram_from_sources<P: AsRef<std::path::Path>>(
     }
 
     // Generate sequence diagram
-    let diagram = generate_sequence_diagram(&combined_ast, config.light_colors)?;
+    let diagram = diagram::generate_sequence_diagram_with_config(&combined_ast, config.clone())?;
 
     // Save to file if specified
     if let Some(output_path) = config.output_file {
